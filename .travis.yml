@@ -1,0 +1,37 @@
+language: bash
+sudo: required
+dist: trusty
+
+before_install:
+- sudo apt-get update -qq
+
+# Install the dependencies of deb-pkg-tools before running the test suite.
+# For more information about the nasty /dev/random hack, please see:
+# https://github.com/travis-ci/travis-ci/issues/1913#issuecomment-33891474
+- sudo apt-get install --yes dpkg-dev fakeroot lintian python-apt rng-tools
+- sudo rm -f /dev/random
+- sudo mknod -m 0666 /dev/random c 1 9
+- echo HRNGDEVICE=/dev/urandom | sudo tee /etc/default/rng-tools
+- sudo /etc/init.d/rng-tools restart
+
+# strangely `openafs-fileserver` doesn't depend on `openafs-dbserver`; `openafs-krb5` provides `asetkey`
+- sudo apt-get install openafs-fileserver openafs-dbserver openafs-client openafs-modules-dkms openafs-krb5
+
+script:
+# `setuptools-version-command>=2.2` in `setup_requires` has no effect, but should work
+- sudo pip install setuptools-version-command>=2.2
+- cd template-helper && git fetch --tags && python setup.py build && sudo python setup.py install && cd ..
+- python setup.py build
+- sudo python setup.py install
+- sudo apt-get install --yes krb5-admin-server krb5-kdc
+- sudo service krb5-admin-server restart
+- sudo service krb5-kdc restart
+- sudo service openafs-fileserver restart
+- sudo service openafs-client restart
+- ifconfig -a
+- echo -e '\n172.17.0.1 test\n' | sudo tee /etc/hosts && cat /etc/hosts
+# test with system packages
+- sudo openafs-setup -admin-pw abc -krb-pw abc -skip-check-output ubuntu ubuntu test test 172.17.0.1 test
+# test with source installation
+- sudo apt-get build-dep --yes krb5 && git clone https://github.com/krb5/krb5.git && cd krb5 && cd src && autoreconf -i -v -f && ./configure && make -j16 && sudo make install && cd .. && cd ..
+- sudo openafs-setup -admin-pw abc -krb-pw abc -skip-check-output ubuntu source test test 172.17.0.1 test

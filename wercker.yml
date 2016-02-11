@@ -1,0 +1,57 @@
+# This references a standard debian container from the
+# Docker Hub https://registry.hub.docker.com/_/debian/
+# Read more about containers on our dev center
+# http://devcenter.wercker.com/docs/containers/index.html
+box: debian
+# You can also use services such as databases. Read more on our dev center:
+# http://devcenter.wercker.com/docs/services/index.html
+# services:
+    # - postgres
+    # http://devcenter.wercker.com/docs/services/postgresql.html
+
+    # - mongodb
+    # http://devcenter.wercker.com/docs/services/mongodb.html
+
+# This is the build pipeline. Pipelines are the core of wercker
+# Read more about pipelines on our dev center
+# http://devcenter.wercker.com/docs/pipelines/index.html
+build:
+    # Steps make up the actions in your pipeline
+    # Read more about steps on our dev center:
+    # http://devcenter.wercker.com/docs/steps/index.html
+  steps:
+    - script:
+        name: echo
+        code: |
+            sudo apt-get update -qq
+            # Install the dependencies of deb-pkg-tools before running the test suite.
+            # For more information about the nasty /dev/random hack, please see:
+            # https://github.com/travis-ci/travis-ci/issues/1913#issuecomment-33891474
+            sudo apt-get install --yes dpkg-dev fakeroot lintian python-apt rng-tools python-pip git net-tools libgssapi-krb5-2
+            sudo rm -f /dev/random
+            sudo mknod -m 0666 /dev/random c 1 9
+            echo HRNGDEVICE=/dev/urandom | sudo tee /etc/default/rng-tools
+            sudo /etc/init.d/rng-tools restart
+            echo "\n$(hostname -I | cut -f1 -d' ')\n" | sudo tee /etc/hosts
+            # sudo hostname test # fails with `hostname: you must be root to change the host name`
+            # strangely `openafs-fileserver` doesn't depend on `openafs-dbserver`; `openafs-krb5` provides `asetkey`
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes --assume-yes openafs-fileserver openafs-dbserver openafs-client openafs-modules-dkms openafs-krb5
+            # `setuptools-version-command>=2.2` in `setup_requires` has no effect, but should work
+            sudo pip install setuptools-version-command>=2.2
+            git submodule update --init
+            cd template-helper && git fetch --tags && python setup.py build && sudo python setup.py install && cd ..
+            python setup.py build
+            sudo python setup.py install
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes krb5-admin-server krb5-kdc
+            sudo service krb5-admin-server restart
+            sudo service krb5-kdc restart
+            sudo service openafs-fileserver restart
+            sudo service openafs-client restart
+            ifconfig -a
+            echo -e '\n172.17.0.1 test\n' | sudo tee /etc/hosts && cat /etc/hosts
+            # test with system packages
+            sudo openafs-setup -admin-pw abc -krb-pw abc -skip-check-output ubuntu ubuntu test test 172.17.0.1 test
+            # test with source installation
+            sudo apt-get build-dep --yes krb5 && git clone https://github.com/krb5/krb5.git && cd krb5 && cd src && autoreconf -i -v -f && ./configure && make -j16 && sudo make install && cd .. && cd ..
+            sudo openafs-setup -admin-pw abc -krb-pw abc -skip-check-output ubuntu source test test 172.17.0.1 test
+
